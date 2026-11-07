@@ -1,0 +1,19 @@
+{
+  "name": "session-map",
+  "version": "0.1.0",
+  "description": "Group your sessions into nested bundles in a side pane, and see them all on an interactive, draggable map with live status and links.",
+  "author": {
+    "name": "ktr0a"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/ktr0a/session-map",
+  "repository": "https://github.com/ktr0a/session-map",
+  "keywords": [
+    "sessions",
+    "sidebar",
+    "graph",
+    "map",
+    "organize"
+  ],
+  "types": "./types/index.d.ts"
+}

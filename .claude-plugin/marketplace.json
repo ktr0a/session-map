@@ -1,0 +1,13 @@
+{
+  "name": "session-map",
+  "owner": {
+    "name": "ktr0a"
+  },
+  "plugins": [
+    {
+      "name": "session-map",
+      "source": "./",
+      "description": "Group your sessions into nested bundles in a side pane, and see them all on an interactive, draggable map with live status and links."
+    }
+  ]
+}

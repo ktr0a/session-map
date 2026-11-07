@@ -1,0 +1,1205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Map</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --canvas: #fbfbfc;
+    --dot: #dfe2e8;
+    --text: #1c1f2b;
+    --muted: #626879;
+    --faint: #9298a8;
+    --panel: #ffffff;
+    --panel-2: #f3f4f7;
+    --border: #e1e4ea;
+    --halo: #fbfbfc;
+    --hub-fill: #ffffff;
+    --edge-started: #2b2f3d;
+    --accent: #3b6fe0;
+    --accent-ink: #ffffff;
+    --danger: #c4372f;
+    --running: #1fa855;
+    --nest: #d08a12;
+    --draw: #7c3aed;
+    --shadow: 0 8px 28px rgba(20, 24, 40, 0.12), 0 1px 3px rgba(20, 24, 40, 0.08);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1014;
+      --canvas: #14151b;
+      --dot: #252733;
+      --text: #eceef5;
+      --muted: #a3a8b8;
+      --faint: #6d7385;
+      --panel: #1a1c23;
+      --panel-2: #22252e;
+      --border: #2b2e3a;
+      --halo: #14151b;
+      --hub-fill: #1c1e26;
+      --edge-started: #e6e8f0;
+      --accent: #6e9cff;
+      --accent-ink: #0d1020;
+      --danger: #ff7b72;
+      --running: #4ade80;
+      --nest: #f4b860;
+      --draw: #b794ff;
+      --shadow: 0 10px 32px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.4);
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  button, input, select { font: inherit; color: inherit; }
+
+  .bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+    background: var(--panel); flex-wrap: wrap; min-height: 48px;
+  }
+  .brand { font-weight: 650; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .brand .logo { width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center;
+    background: var(--accent); color: var(--accent-ink); font-size: 13px; }
+  #search {
+    flex: 1 1 180px; max-width: 320px; min-width: 120px;
+    padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel-2); outline: none;
+  }
+  #search:focus { border-color: var(--accent); }
+  .stats { color: var(--muted); white-space: nowrap; }
+  .spacer { flex: 1; }
+  .live { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; font-size: 12px; }
+  .live i { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+  .live.ok i { background: var(--running); box-shadow: 0 0 0 3px color-mix(in srgb, var(--running) 25%, transparent); }
+  .live.stale i { background: var(--nest); }
+  .live.down i { background: var(--danger); }
+  .btn {
+    padding: 6px 11px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel-2); cursor: pointer; white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--faint); }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  .btn.danger { color: var(--danger); }
+  .btn[aria-pressed="false"] { opacity: 0.6; }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+
+  main { position: relative; flex: 1; min-height: 0; background: var(--canvas); }
+  svg#svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; user-select: none; }
+  svg#svg.panning { cursor: grabbing; }
+  .node { cursor: pointer; }
+  .node.dragging { cursor: grabbing; }
+  .faded { opacity: 0.16; }
+  .edge { fill: none; vector-effect: non-scaling-stroke; }
+  .edge.member { stroke-width: 1.3; stroke-opacity: 0.38; }
+  .edge.started { stroke: var(--edge-started); stroke-width: 1.8; stroke-opacity: 0.85; }
+  .edge.nest { stroke: var(--nest); stroke-width: 1.7; stroke-dasharray: 5 4; }
+  .disc { fill: var(--hub-fill); stroke-width: 2.2; vector-effect: non-scaling-stroke; }
+  .hub.group .disc { stroke-dasharray: 4 3; }
+  .hub.selected .disc { stroke-width: 3.6; }
+  .ini { font-weight: 750; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+  .hub-label, .label {
+    fill: var(--text); paint-order: stroke; stroke: var(--halo); stroke-width: 3.5px;
+    stroke-linejoin: round; pointer-events: none;
+  }
+  .hub-label { font-weight: 650; text-anchor: middle; font-size: calc(12.5px * var(--ls, 1)); }
+  .label { font-size: calc(11px * var(--ls, 1)); fill: var(--muted); }
+  .session.selected .label { fill: var(--text); font-weight: 700; }
+  .hide-labels .session:not(.selected):not(.near):not(.match) .label { display: none; }
+  .dot { stroke: var(--canvas); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .routine .dot { fill-opacity: 0.5; }
+  .ring { fill: none; stroke: var(--text); stroke-width: 2; vector-effect: non-scaling-stroke; display: none; }
+  .selected .ring, .match .ring { display: block; }
+  .match:not(.selected) .ring { stroke: var(--accent); stroke-dasharray: 3 2; }
+  .pulse { fill: none; stroke: var(--running); stroke-width: 2; vector-effect: non-scaling-stroke;
+    transform-box: fill-box; transform-origin: center; animation: pulse 1.8s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { transform: scale(0.85); opacity: 0.9; } 50% { transform: scale(1.25); opacity: 0.35; } }
+  .drawn { fill: none; stroke: var(--draw); stroke-width: 2; vector-effect: non-scaling-stroke; }
+  .drawn-g.sel .drawn { stroke-width: 3.4; }
+  .drawn-hit { fill: none; stroke: transparent; stroke-width: 14; vector-effect: non-scaling-stroke; pointer-events: stroke; cursor: pointer; }
+  .drawn-label { fill: var(--draw); font-size: calc(11px * var(--ls, 1)); font-weight: 650; text-anchor: middle;
+    paint-order: stroke; stroke: var(--halo); stroke-width: 3.5px; stroke-linejoin: round; pointer-events: none; }
+  .draft { fill: none; stroke: var(--draw); stroke-width: 2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+  svg#svg.drawing, svg#svg.draw-mode { cursor: crosshair; }
+  .node.drop-target .ring { display: block; stroke: var(--draw); stroke-dasharray: none; }
+  .btn.on { background: var(--draw); color: #fff; border-color: transparent; }
+  .field input { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); outline: none; }
+  .field input:focus { border-color: var(--draw); }
+  .live.demo i { background: var(--draw); }
+  .star { fill: #e5b728; font-size: 10px; text-anchor: middle; pointer-events: none; }
+
+  .legend, .hint {
+    position: absolute; padding: 6px 10px; border-radius: 10px; font-size: 11.5px; color: var(--muted);
+    background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--border);
+    backdrop-filter: blur(6px); pointer-events: none;
+  }
+  .legend { left: 12px; bottom: 12px; display: flex; gap: 14px; flex-wrap: wrap; max-width: calc(100% - 24px); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend svg { overflow: visible; }
+  .hint { right: 12px; top: 12px; }
+  body.has-panel .hint { display: none; }
+  .tooltip {
+    position: absolute; pointer-events: none; z-index: 5; max-width: 300px;
+    padding: 8px 10px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border);
+    box-shadow: var(--shadow); font-size: 12px;
+  }
+  .tooltip b { display: block; font-size: 12.5px; margin-bottom: 2px; }
+  .tooltip span { color: var(--muted); }
+
+  .panel {
+    position: absolute; top: 12px; right: 12px; bottom: 12px; width: 340px; z-index: 6;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .panel-head { display: flex; align-items: flex-start; gap: 10px; padding: 14px 14px 8px; }
+  .panel-head h2 { margin: 0; font-size: 15px; line-height: 1.3; flex: 1; overflow-wrap: anywhere; }
+  .swatch { width: 12px; height: 12px; border-radius: 50%; margin-top: 4px; flex: none; }
+  .x { border: none; background: none; cursor: pointer; color: var(--muted); font-size: 18px; line-height: 1; padding: 0 2px; }
+  .panel-body { padding: 0 14px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { padding: 2px 8px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border); font-size: 11.5px; color: var(--muted); }
+  .chip.run { color: var(--running); border-color: color-mix(in srgb, var(--running) 40%, var(--border)); }
+  .row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  .field select { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); }
+  .tag { font-size: 10.5px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--nest) 18%, transparent); color: var(--nest); margin-left: 4px; }
+  .note { font-size: 12px; color: var(--muted); }
+  .confirm { border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border)); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .links h3 { margin: 0 0 4px; font-size: 11.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .links { display: flex; flex-direction: column; gap: 10px; }
+  .item {
+    display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+    padding: 5px 8px; border-radius: 8px; border: 1px solid transparent; background: none; cursor: pointer;
+  }
+  .item:hover { background: var(--panel-2); border-color: var(--border); }
+  .item .d { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .item .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .a { color: var(--faint); font-size: 11.5px; }
+  .branch { width: 8px; height: 9px; margin: -6px -2px 0 0; border-left: 1.5px solid var(--faint); border-bottom: 1.5px solid var(--faint); border-bottom-left-radius: 3px; flex: none; }
+  .item.run .d { box-shadow: 0 0 0 3px color-mix(in srgb, var(--running) 35%, transparent); }
+
+  .toasts { position: absolute; left: 50%; bottom: 56px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; z-index: 9; align-items: center; }
+  .toast { padding: 7px 12px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); box-shadow: var(--shadow); font-size: 12.5px; }
+  .toast.err { border-color: var(--danger); color: var(--danger); }
+  .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 24px; pointer-events: none; }
+  .empty b { display: block; color: var(--text); font-size: 15px; margin-bottom: 4px; }
+
+  @media (max-width: 760px) {
+    .panel { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; max-height: 55%; }
+    .hint { display: none; }
+    .stats { display: none; }
+  }
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="brand"><span class="logo">◎</span>Session map</div>
+  <input id="search" type="search" placeholder="Search sessions  ( / )" autocomplete="off">
+  <div id="stats" class="stats"></div>
+  <div class="spacer"></div>
+  <span id="live" class="live" title="Live data comes from the session-map mod"><i></i><b>connecting</b></span>
+  <button id="draw" class="btn" title="Draw arrows: drag from one node to another (or hold Shift and drag)">✎ Arrow</button>
+  <button id="labels" class="btn" aria-pressed="true" title="Show every session's name (L)">Labels</button>
+  <button id="arrange" class="btn" title="Lay everything out again">Re-arrange</button>
+  <button id="fit" class="btn primary" title="Show everything (F)">Fit</button>
+</header>
+<main id="stage">
+  <svg id="svg" xmlns="http://www.w3.org/2000/svg" aria-label="Graph of your sessions">
+    <defs>
+      <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+        <circle cx="1" cy="1" r="1" fill="var(--dot)"/>
+      </pattern>
+      <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="var(--edge-started)"/>
+      </marker>
+      <marker id="arrow-draw" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="var(--draw)"/>
+      </marker>
+      <marker id="arrow-nest" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" fill="var(--nest)"/>
+      </marker>
+    </defs>
+    <rect id="bg" x="0" y="0" width="100%" height="100%" fill="url(#dots)"/>
+    <g id="viewport">
+      <g id="edges"></g>
+      <g id="drawn"></g>
+      <g id="nodes"></g>
+    </g>
+  </svg>
+  <div class="legend">
+    <span><svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="none" stroke="var(--running)" stroke-width="2"/></svg>running</span>
+    <span><svg width="26" height="10"><path d="M1 5 H22" stroke="var(--edge-started)" stroke-width="1.8" marker-end="url(#arrow)"/></svg>started (real link)</span>
+    <span><svg width="26" height="10"><path d="M1 5 H22" stroke="var(--nest)" stroke-width="1.7" stroke-dasharray="5 4"/></svg>nested (map only)</span>
+    <span><svg width="26" height="10"><path d="M1 5 H22" stroke="var(--draw)" stroke-width="2" marker-end="url(#arrow-draw)"/></svg>your arrows (map only)</span>
+    <span><span style="color:#e5b728">★</span>pinned</span>
+  </div>
+  <div class="hint">Scroll or Ctrl+scroll to zoom · drag empty space to pan · drag nodes · Shift+drag to draw an arrow · double-click to open</div>
+  <div id="tooltip" class="tooltip" hidden></div>
+  <aside id="panel" class="panel" hidden></aside>
+  <div id="empty" class="empty" hidden><div><b>Waiting for your sessions…</b>The map fills in once the session-map mod is running.</div></div>
+  <div id="toasts" class="toasts"></div>
+</main>
+<script>
+'use strict'
+const TOKEN = new URLSearchParams(location.search).get('t') || ''
+const SEP = ' · '
+const PALETTE = ['#4f8ef7', '#9b6cf2', '#e09a2f', '#20a7c9', '#e5675e', '#d9649f', '#7cb82f', '#c9a227']
+const GROUP = {
+  'g:pinned': { label: 'Pinned', color: '#d9a920' },
+  'g:unsorted': { label: 'Unsorted', color: '#8b93a1' },
+  'g:routines': { label: 'Scheduled runs', color: '#6b7280' },
+}
+const RADIUS = { parent: 26, section: 18, group: 16, session: 7 }
+const NS = 'http://www.w3.org/2000/svg'
+
+const $ = id => document.getElementById(id)
+const svg = $('svg'), viewport = $('viewport'), edgesG = $('edges'), nodesG = $('nodes')
+
+let data = { rows: [], sections: [], labels: { parents: {}, children: {} }, nests: {}, loadedAt: 0 }
+let dataKey = ''
+let model = { nodes: [], edges: [], byId: new Map(), kids: new Map() }
+const sim = new Map() // id -> { x, y, vx, vy, fixed }
+let view = { tx: 0, ty: 0, k: 1 }
+let selected = '', query = '', showLabels = true, confirmArchive = ''
+let alpha = 0, fitWhenSettled = false, saveTimer = 0, raf = 0
+const els = new Map(), edgeEls = new Map()
+// Arrows you draw: informational only, kept with the layout, never sent to the app.
+let arrows = [], selectedArrow = '', drawMode = false
+const arrowEls = new Map()
+const drawnG = $('drawn')
+const DEMO = new URLSearchParams(location.search).has('demo')
+
+// ---------- demo: made-up sessions, nothing real is read or changed ----------
+const DEMO_STATE = (() => {
+  const at = m => new Date(Date.now() - m * 60000).toISOString()
+  const row = (id, title, group, m, extra = {}) => ({ id, title, group, pinned: false, running: false, lastActivityAt: at(m), routine: false, isSelf: false, startedBy: null, ...extra })
+  return {
+    sections: [
+      { id: 'w', name: 'Work', order: 1 }, { id: 'wb', name: 'Work · Backend', order: 2 },
+      { id: 'wf', name: 'Work · Frontend', order: 3 }, { id: 'r', name: 'Research', order: 4 }, { id: 'h', name: 'Home', order: 5 },
+    ],
+    labels: { parents: {}, children: { Work: 'Coordination' } },
+    nests: { notes: 'lit' },
+    rows: [
+      row('coord', 'Release coordinator', 'w', 2, { running: true }),
+      row('changelog', 'Write the v2.4 changelog', 'w', 50, { startedBy: 'coord' }),
+      row('ci', 'Fix flaky CI tests', 'wb', 4, { running: true, startedBy: 'coord' }),
+      row('oauth', 'Migrate login to OAuth', 'wb', 180, { startedBy: 'coord' }),
+      row('db', 'Database index tuning', 'wb', 1500),
+      row('landing', 'Landing page redesign', 'wf', 90),
+      row('a11y', 'Accessibility audit', 'wf', 300, { startedBy: 'landing' }),
+      row('lit', 'Literature review: graph layouts', 'r', 2900),
+      row('bench', 'Benchmark force simulation', 'r', 12, { running: true }),
+      row('notes', 'Reading notes, week 12', 'r', 4300),
+      row('tax', 'Tax forms checklist', 'h', 7200),
+      row('trip', 'Plan a weekend in Lisbon', 'h', 2000),
+      row('roadmap', 'Roadmap for next quarter', null, 600, { pinned: true }),
+      row('inbox', 'Inbox triage', null, 240),
+      row('me', 'Organise my sessions', null, 0, { running: true, isSelf: true }),
+      row('standup', 'Daily standup notes', null, 800, { routine: true }),
+      row('deps', 'Nightly dependency check', null, 400, { routine: true }),
+    ],
+    layout: { arrows: [
+      { id: 'd1', from: 'lit', to: 'bench', label: 'informs' },
+      { id: 'd2', from: 'bench', to: 'landing', label: 'demo for' },
+      { id: 'd3', from: 'ci', to: 'changelog', label: 'blocks' },
+    ] },
+  }
+})()
+
+async function demoApi(path, opts) {
+  const s = DEMO_STATE
+  if (path === '/api/data') return { rows: s.rows, sections: s.sections, labels: s.labels, nests: s.nests, loadedAt: Date.now() }
+  if (path === '/api/layout') { if (opts.method === 'PUT') s.layout = JSON.parse(opts.body); return s.layout }
+  if (path === '/api/action') {
+    const a = JSON.parse(opts.body)
+    const r = s.rows.find(x => x.id === a.sessionId)
+    if (a.type === 'move' && r) r.group = a.target === 'sessions' ? null : a.target
+    if (a.type === 'pin' && r) r.pinned = a.pinned
+    if (a.type === 'nest' && r) { if (a.parent) s.nests[r.id] = a.parent; else delete s.nests[r.id] }
+    if (a.type === 'archive' && r) s.rows = s.rows.filter(x => x !== r)
+    return { id: 'demo' }
+  }
+  if (path.startsWith('/api/result')) return { ok: true, message: 'Done (demo: nothing real changed)' }
+  return {}
+}
+
+// ---------- talking to the local server ----------
+async function api(path, opts = {}) {
+  if (DEMO) return demoApi(path, opts)
+  const res = await fetch(path, { ...opts, headers: { 'x-session-map-token': TOKEN, 'content-type': 'application/json' } })
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText)
+  return res.json()
+}
+
+function toast(text, isError = false) {
+  const t = document.createElement('div')
+  t.className = 'toast' + (isError ? ' err' : '')
+  t.textContent = text
+  $('toasts').append(t)
+  setTimeout(() => t.remove(), isError ? 6000 : 3200)
+}
+
+async function act(payload, label) {
+  toast(label + '…')
+  try {
+    const { id } = await api('/api/action', { method: 'POST', body: JSON.stringify(payload) })
+    const until = Date.now() + 25000
+    while (Date.now() < until) {
+      await new Promise(r => setTimeout(r, 400))
+      const r = await api('/api/result?id=' + encodeURIComponent(id))
+      if (r.pending) continue
+      if (r.ok) toast(r.message || label + ': done')
+      else toast(label + ' failed: ' + (r.message || 'unknown error'), true)
+      await loadData(true)
+      return r.ok
+    }
+    toast('No answer. Is the session-map mod running?', true)
+  } catch (err) {
+    toast(label + ' failed: ' + err.message, true)
+  }
+  return false
+}
+
+// ---------- shaping the model ----------
+function hash(text) {
+  let h = 2166136261
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619)
+  return (h >>> 0) / 4294967296
+}
+
+function buildTree(sections, labels) {
+  const byParent = new Map()
+  for (const s of sections) {
+    const parent = s.name.includes(SEP) ? s.name.split(SEP)[0] : s.name
+    if (!byParent.has(parent)) byParent.set(parent, [])
+    byParent.get(parent).push(s)
+  }
+  const out = []
+  for (const [parent, secs] of byParent) {
+    const nested = secs.length > 1 || secs.some(s => s.name.includes(SEP))
+    if (!nested) { out.push({ key: 's:' + secs[0].id, label: secs[0].name, section: secs[0], children: [] }); continue }
+    out.push({
+      key: 'p:' + parent, label: (labels.parents || {})[parent] || parent, children: secs.map(s => ({
+        key: 's:' + s.id,
+        label: s.name === parent ? ((labels.children || {})[parent] || 'General') : s.name.slice(parent.length + SEP.length),
+        section: s, children: [],
+      })),
+    })
+  }
+  return out
+}
+
+function hubOf(r, filed) {
+  if (r.pinned) return 'g:pinned'
+  if (r.routine) return 'g:routines'
+  if (r.group && filed.has(r.group)) return 's:' + r.group
+  return 'g:unsorted'
+}
+
+function buildModel() {
+  const nodes = [], edges = []
+  const tree = buildTree(data.sections || [], data.labels || {})
+  const color = new Map(), bundleName = new Map()
+  let shade = 0
+  for (const node of tree) {
+    if (node.section) {
+      const c = PALETTE[shade++ % PALETTE.length]
+      color.set(node.key, c); bundleName.set(node.key, node.label)
+      nodes.push({ id: node.key, kind: 'section', label: node.label, color: c })
+      continue
+    }
+    nodes.push({ id: node.key, kind: 'parent', label: node.label, color: 'var(--text)' })
+    for (const child of node.children) {
+      const c = PALETTE[shade++ % PALETTE.length]
+      color.set(child.key, c); bundleName.set(child.key, node.label + ' › ' + child.label)
+      nodes.push({ id: child.key, kind: 'section', label: child.label, color: c })
+      edges.push({ a: node.key, b: child.key, kind: 'member' })
+    }
+  }
+  const filed = new Set((data.sections || []).map(s => s.id))
+  const ids = new Set(data.rows.map(r => r.id))
+  const used = new Set()
+  for (const r of data.rows) {
+    const hub = hubOf(r, filed)
+    if (hub.startsWith('g:')) used.add(hub)
+    const c = color.get(hub) || GROUP[hub]?.color || '#8b93a1'
+    nodes.push({ id: r.id, kind: 'session', label: r.title + (r.isSelf ? ' (this session)' : ''), color: c, row: r, hub,
+      bundle: bundleName.get(hub) || GROUP[hub]?.label || 'Unsorted' })
+    edges.push({ a: hub, b: r.id, kind: 'member' })
+    if (r.startedBy && ids.has(r.startedBy)) edges.push({ a: r.startedBy, b: r.id, kind: 'started' })
+    const nest = (data.nests || {})[r.id]
+    if (nest && ids.has(nest) && nest !== r.startedBy) edges.push({ a: nest, b: r.id, kind: 'nest' })
+  }
+  for (const g of Object.keys(GROUP)) if (used.has(g)) nodes.push({ id: g, kind: 'group', label: GROUP[g].label, color: GROUP[g].color })
+  const byId = new Map(nodes.map(n => [n.id, n]))
+  const kids = new Map()
+  for (const e of edges) if (e.kind === 'member') { if (!kids.has(e.a)) kids.set(e.a, []); kids.get(e.a).push(e.b) }
+  model = { nodes, edges, byId, kids, tree }
+}
+
+function descendants(id) {
+  const out = [], stack = [id]
+  while (stack.length) for (const k of model.kids.get(stack.pop()) || []) { out.push(k); stack.push(k) }
+  return out
+}
+
+// ---------- positions ----------
+function seedPositions() {
+  const hubs = model.nodes.filter(n => n.kind !== 'session')
+  const ring = 220 + hubs.length * 24
+  let fresh = 0
+  hubs.forEach((n, i) => {
+    if (sim.has(n.id)) return
+    const a = (i / Math.max(1, hubs.length)) * Math.PI * 2 - Math.PI / 2
+    const f = n.kind === 'parent' ? 0.5 : 1
+    sim.set(n.id, { x: Math.cos(a) * ring * f, y: Math.sin(a) * ring * f, vx: 0, vy: 0, fixed: false })
+    fresh++
+  })
+  for (const n of model.nodes) {
+    if (n.kind !== 'session' || sim.has(n.id)) continue
+    const hub = sim.get(n.hub) || { x: 0, y: 0 }
+    const a = hash(n.id) * Math.PI * 2, d = 40 + hash(n.id + 'r') * 40
+    sim.set(n.id, { x: hub.x + Math.cos(a) * d, y: hub.y + Math.sin(a) * d, vx: 0, vy: 0, fixed: false })
+    fresh++
+  }
+  for (const id of [...sim.keys()]) if (!model.byId.has(id)) sim.delete(id)
+  return fresh
+}
+
+// Lays everything out at once, before anything is drawn, so the map does not drift under the pointer.
+function settleNow() {
+  alpha = 1
+  for (let n = 0; n < 700 && alpha > 0.003; n++) tick()
+  alpha = 0
+  for (const p of sim.values()) p.fixed = true
+  scheduleSave()
+}
+
+function heat(a) { alpha = Math.max(alpha, a); if (!raf) raf = requestAnimationFrame(frame) }
+
+function tick() {
+  const list = model.nodes.map(n => [n, sim.get(n.id)]).filter(([, p]) => p)
+  const force = new Map(list.map(([, p]) => [p, { x: -p.x * 0.005, y: -p.y * 0.005 }]))
+  for (let i = 0; i < list.length; i++) {
+    const [na, a] = list[i]
+    for (let j = i + 1; j < list.length; j++) {
+      const [nb, b] = list[j]
+      let dx = a.x - b.x, dy = a.y - b.y
+      let d2 = dx * dx + dy * dy
+      if (d2 > 300000) continue
+      if (d2 < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 1 }
+      const w = (na.kind === 'session' ? 1 : 4.5) * (nb.kind === 'session' ? 1 : 4.5)
+      const push = (1500 * w) / Math.max(d2, 36)
+      const d = Math.sqrt(d2)
+      const fa = force.get(a), fb = force.get(b)
+      fa.x += (dx / d) * push; fa.y += (dy / d) * push
+      fb.x -= (dx / d) * push; fb.y -= (dy / d) * push
+    }
+  }
+  const count = new Map()
+  for (const e of model.edges) if (e.kind === 'member') count.set(e.a, (count.get(e.a) || 0) + 1)
+  for (const e of model.edges) {
+    const a = sim.get(e.a), b = sim.get(e.b)
+    if (!a || !b) continue
+    const dx = b.x - a.x, dy = b.y - a.y, d = Math.max(1, Math.hypot(dx, dy))
+    const na = model.byId.get(e.a)
+    const want = e.kind === 'member' ? (na.kind === 'parent' ? 190 : 70 + Math.sqrt(count.get(e.a) || 1) * 15) : e.kind === 'started' ? 95 : 80
+    const pull = (d - want) * (e.kind === 'member' ? 0.06 : 0.012)
+    const fa = force.get(a), fb = force.get(b)
+    fa.x += (dx / d) * pull; fa.y += (dy / d) * pull
+    fb.x -= (dx / d) * pull; fb.y -= (dy / d) * pull
+  }
+  // Keep session labels from sitting on top of each other.
+  const boxes = list.filter(([n]) => n.kind === 'session')
+  for (let i = 0; i < boxes.length; i++) {
+    const [na, a] = boxes[i]
+    const wa = 20 + Math.min(34, na.label.length) * 6
+    for (let j = i + 1; j < boxes.length; j++) {
+      const [nb, b] = boxes[j]
+      const wb = 20 + Math.min(34, nb.label.length) * 6
+      const ax0 = a.x - 9, ax1 = a.x + wa, bx0 = b.x - 9, bx1 = b.x + wb
+      const ox = Math.min(ax1, bx1) - Math.max(ax0, bx0)
+      const oy = 20 - Math.abs(a.y - b.y)
+      if (ox <= 0 || oy <= 0) continue
+      const sy = a.y < b.y ? -1 : 1
+      const fa = force.get(a), fb = force.get(b)
+      fa.y += sy * oy * 0.35; fb.y -= sy * oy * 0.35
+      const sx = a.x < b.x ? -1 : 1
+      fa.x += sx * Math.min(ox, 30) * 0.04; fb.x -= sx * Math.min(ox, 30) * 0.04
+    }
+  }
+  for (const [, p] of list) {
+    if (p.fixed || p === dragging?.p) { p.vx = p.vy = 0; continue }
+    const f = force.get(p)
+    p.vx = (p.vx + f.x * alpha) * 0.6
+    p.vy = (p.vy + f.y * alpha) * 0.6
+    const lim = 30
+    p.x += Math.max(-lim, Math.min(lim, p.vx))
+    p.y += Math.max(-lim, Math.min(lim, p.vy))
+  }
+  alpha *= 0.978
+}
+
+function frame() {
+  raf = 0
+  if (alpha > 0.003) {
+    tick()
+    if (alpha <= 0.003) {
+      alpha = 0
+      // Settled: what the map shows now is where things stay.
+      for (const p of sim.values()) p.fixed = true
+      if (fitWhenSettled) { fitWhenSettled = false; fit() }
+      scheduleSave()
+    }
+  }
+  place()
+  if (alpha > 0.003) raf = requestAnimationFrame(frame)
+}
+
+// ---------- drawing ----------
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag)
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v)
+  if (parent) parent.append(e)
+  return e
+}
+
+function initials(label) {
+  const words = label.replace(/[^\p{L}\p{N} ]/gu, ' ').split(/\s+/).filter(Boolean)
+  if (!words.length) return '•'
+  return words.length === 1 ? words[0].slice(0, 2) : words.slice(0, 2).map(w => w[0]).join('').toUpperCase()
+}
+
+const clip = (t, n) => (t.length > n ? t.slice(0, n - 1) + '…' : t)
+
+function draw() {
+  // Edges.
+  const wantEdges = new Set()
+  for (const e of model.edges) {
+    const key = e.kind + ':' + e.a + '>' + e.b
+    wantEdges.add(key)
+    if (edgeEls.has(key)) continue
+    const tag = e.kind === 'member' ? 'line' : 'path'
+    const node = el(tag, { class: 'edge ' + e.kind }, edgesG)
+    if (e.kind === 'member') node.setAttribute('stroke', model.byId.get(e.a)?.color || '#8b93a1')
+    if (e.kind === 'started') node.setAttribute('marker-end', 'url(#arrow)')
+    if (e.kind === 'nest') node.setAttribute('marker-end', 'url(#arrow-nest)')
+    edgeEls.set(key, { node, e })
+  }
+  for (const [key, { node }] of edgeEls) if (!wantEdges.has(key)) { node.remove(); edgeEls.delete(key) }
+
+  // Nodes, rebuilt when what they show changes.
+  const want = new Set()
+  for (const n of model.nodes) {
+    want.add(n.id)
+    const sig = JSON.stringify([n.kind, n.label, n.color, n.row?.running, n.row?.pinned, n.row?.routine])
+    const have = els.get(n.id)
+    if (have && have.sig === sig) { have.n = n; continue }
+    if (have) have.g.remove()
+    const g = el('g', { class: 'node ' + (n.kind === 'session' ? 'session' : 'hub ' + n.kind), 'data-id': n.id })
+    if (n.kind === 'session') {
+      if (n.row.running) el('circle', { class: 'pulse', r: 11 }, g)
+      el('circle', { class: 'ring', r: 11.5 }, g)
+      el('circle', { class: 'dot', r: RADIUS.session, fill: n.color }, g)
+      if (n.row.pinned) el('text', { class: 'star', y: -11 }, g).textContent = '★'
+      if (n.row.routine) g.classList.add('routine')
+      const t = el('text', { class: 'label', x: 12, y: 4 }, g)
+      t.textContent = clip(n.label, 34)
+    } else {
+      const r = RADIUS[n.kind]
+      el('circle', { r: r + 7, fill: n.color, 'fill-opacity': 0.1 }, g)
+      el('circle', { class: 'disc', r, stroke: n.color }, g)
+      const ini = el('text', { class: 'ini', fill: n.color, 'font-size': n.kind === 'parent' ? 13 : 11 }, g)
+      ini.textContent = initials(n.label)
+      el('text', { class: 'hub-label', y: r + 17 }, g).textContent = n.label
+    }
+    nodesG.append(g)
+    els.set(n.id, { g, n, sig })
+  }
+  for (const [id, { g }] of els) if (!want.has(id)) { g.remove(); els.delete(id) }
+  // Sessions above bundles.
+  for (const [, { g, n }] of els) if (n.kind === 'session') nodesG.append(g)
+  drawArrows()
+  highlight()
+  place()
+}
+
+function drawArrows() {
+  const want = new Set()
+  for (const a of arrows) {
+    if (!model.byId.has(a.from) || !model.byId.has(a.to)) continue
+    want.add(a.id)
+    let have = arrowEls.get(a.id)
+    if (!have) {
+      const g = el('g', { class: 'drawn-g', 'data-arrow': a.id }, drawnG)
+      const hit = el('path', { class: 'drawn-hit' }, g)
+      const line = el('path', { class: 'drawn', 'marker-end': 'url(#arrow-draw)' }, g)
+      const text = el('text', { class: 'drawn-label' }, g)
+      have = { g, hit, line, text }
+      arrowEls.set(a.id, have)
+    }
+    have.a = a
+    have.text.textContent = a.label || ''
+  }
+  for (const [id, { g }] of arrowEls) if (!want.has(id)) { g.remove(); arrowEls.delete(id) }
+}
+
+function curve(a, b, bend, back) {
+  const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2
+  const cx = mx - (b.y - a.y) * bend, cy = my + (b.x - a.x) * bend
+  const len = Math.max(1, Math.hypot(b.x - cx, b.y - cy))
+  const ex = b.x - ((b.x - cx) / len) * back, ey = b.y - ((b.y - cy) / len) * back
+  return { cx, cy, ex, ey, d: `M${a.x.toFixed(1)} ${a.y.toFixed(1)} Q${cx.toFixed(1)} ${cy.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}` }
+}
+
+function reach(id) {
+  const n = model.byId.get(id)
+  return (n ? RADIUS[n.kind] : RADIUS.session) + 4
+}
+
+function place() {
+  for (const [id, { g }] of els) {
+    const p = sim.get(id)
+    if (p) g.setAttribute('transform', `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`)
+  }
+  for (const [, { node, e }] of edgeEls) {
+    const a = sim.get(e.a), b = sim.get(e.b)
+    if (!a || !b) continue
+    if (e.kind === 'member') {
+      node.setAttribute('x1', a.x); node.setAttribute('y1', a.y); node.setAttribute('x2', b.x); node.setAttribute('y2', b.y)
+      continue
+    }
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2
+    const cx = mx - (b.y - a.y) * 0.18, cy = my + (b.x - a.x) * 0.18
+    const len = Math.max(1, Math.hypot(b.x - cx, b.y - cy))
+    const back = RADIUS.session + 4
+    const ex = b.x - ((b.x - cx) / len) * back, ey = b.y - ((b.y - cy) / len) * back
+    node.setAttribute('d', `M${a.x.toFixed(1)} ${a.y.toFixed(1)} Q${cx.toFixed(1)} ${cy.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`)
+  }
+  for (const [, { a, hit, line, text }] of arrowEls) {
+    const p = sim.get(a.from), q = sim.get(a.to)
+    if (!p || !q) continue
+    const c = curve(p, q, -0.22, reach(a.to))
+    hit.setAttribute('d', c.d)
+    line.setAttribute('d', c.d)
+    // The label sits at the curve's middle.
+    text.setAttribute('x', ((p.x + 2 * c.cx + q.x) / 4).toFixed(1))
+    text.setAttribute('y', ((p.y + 2 * c.cy + q.y) / 4 - 7).toFixed(1))
+  }
+  viewport.setAttribute('transform', `translate(${view.tx} ${view.ty}) scale(${view.k})`)
+  const ls = 1 / Math.min(1.8, Math.max(0.75, view.k))
+  svg.style.setProperty('--ls', ls.toFixed(3))
+  svg.classList.toggle('hide-labels', !showLabels || view.k < 0.45)
+}
+
+function highlight() {
+  const near = new Set()
+  if (selected) {
+    near.add(selected)
+    for (const e of model.edges) { if (e.a === selected) near.add(e.b); if (e.b === selected) near.add(e.a) }
+  }
+  const q = query.trim().toLowerCase()
+  const matches = new Set(q ? model.nodes.filter(n => n.label.toLowerCase().includes(q)).map(n => n.id) : [])
+  for (const [id, { g }] of els) {
+    g.classList.toggle('selected', id === selected)
+    g.classList.toggle('near', near.has(id) && id !== selected)
+    g.classList.toggle('match', matches.has(id))
+    const fade = (selected && !near.has(id)) || (q && !matches.has(id) && !near.has(id))
+    g.classList.toggle('faded', Boolean(fade))
+  }
+  for (const [, { node, e }] of edgeEls) {
+    const fade = (selected && !(near.has(e.a) && near.has(e.b) && (e.a === selected || e.b === selected))) || (q && !(matches.has(e.a) || matches.has(e.b)))
+    node.classList.toggle('faded', Boolean(fade))
+  }
+  for (const [id, { a, g }] of arrowEls) {
+    g.classList.toggle('sel', id === selectedArrow)
+    const touches = a.from === selected || a.to === selected
+    g.classList.toggle('faded', Boolean((selected && !touches) || (selectedArrow && id !== selectedArrow)))
+  }
+}
+
+// ---------- view: fit, zoom, pan ----------
+function size() { const r = svg.getBoundingClientRect(); return { w: r.width, h: r.height, left: r.left, top: r.top } }
+
+let fitPending = false
+function fit() {
+  const pts = [...sim.values()]
+  if (!pts.length) return
+  const { w, h } = size()
+  // Not laid out yet (a hidden tab, a pane still opening): fit once it has a size.
+  if (w < 80 || h < 80) { fitPending = true; return }
+  fitPending = false
+  const panelW = $('panel').hidden || w < 760 ? 0 : 352
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+  for (const p of pts) { x0 = Math.min(x0, p.x - 34); y0 = Math.min(y0, p.y - 34); x1 = Math.max(x1, p.x + 140); y1 = Math.max(y1, p.y + 38) }
+  const k = Math.max(0.15, Math.min(1.8, (w - panelW - 40) / (x1 - x0), (h - 90) / (y1 - y0)))
+  view = { k, tx: (w - panelW) / 2 - ((x0 + x1) / 2) * k, ty: h / 2 - 10 - ((y0 + y1) / 2) * k }
+  place(); scheduleSave()
+}
+
+function zoomAt(px, py, factor) {
+  const k = Math.max(0.15, Math.min(4, view.k * factor))
+  const f = k / view.k
+  view = { k, tx: px - (px - view.tx) * f, ty: py - (py - view.ty) * f }
+  place(); scheduleSave()
+}
+
+function toWorld(clientX, clientY) {
+  const { left, top } = size()
+  return { x: (clientX - left - view.tx) / view.k, y: (clientY - top - view.ty) / view.k }
+}
+
+svg.addEventListener('wheel', ev => {
+  ev.preventDefault()
+  const unit = ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? 400 : 1
+  const delta = ev.deltaY * unit
+  // Ctrl+wheel (and trackpad pinch, which sends it) is finer-grained, so it zooms harder per unit.
+  const factor = Math.exp(-delta * (ev.ctrlKey ? 0.01 : 0.0018))
+  const { left, top } = size()
+  zoomAt(ev.clientX - left, ev.clientY - top, factor)
+}, { passive: false })
+
+let dragging = null // { kind: 'node' | 'pan', id, p, start, moved, offX, offY, last }
+svg.addEventListener('pointerdown', ev => {
+  if (ev.button !== 0 && ev.button !== 1) return
+  const nodeEl = ev.button === 0 ? ev.target.closest('.node') : null
+  const arrowEl = ev.button === 0 ? ev.target.closest('.drawn-g') : null
+  svg.setPointerCapture(ev.pointerId)
+  hideTip()
+  if (arrowEl) {
+    dragging = { kind: 'arrowpick', id: arrowEl.dataset.arrow, start: [ev.clientX, ev.clientY], moved: false }
+  } else if (nodeEl && (ev.shiftKey || drawMode)) {
+    const draft = el('path', { class: 'draft' }, drawnG)
+    dragging = { kind: 'draw', from: nodeEl.dataset.id, start: [ev.clientX, ev.clientY], moved: false, draft, over: null }
+    svg.classList.add('drawing')
+  } else if (nodeEl) {
+    const id = nodeEl.dataset.id, p = sim.get(id), w = toWorld(ev.clientX, ev.clientY)
+    dragging = { kind: 'node', id, p, start: [ev.clientX, ev.clientY], moved: false, offX: p.x - w.x, offY: p.y - w.y, last: [p.x, p.y], g: nodeEl }
+  } else {
+    dragging = { kind: 'pan', start: [ev.clientX, ev.clientY], moved: false, tx: view.tx, ty: view.ty }
+    svg.classList.add('panning')
+  }
+  ev.preventDefault()
+})
+
+svg.addEventListener('pointermove', ev => {
+  if (!dragging) return showTip(ev)
+  const dx = ev.clientX - dragging.start[0], dy = ev.clientY - dragging.start[1]
+  if (!dragging.moved && Math.hypot(dx, dy) < 4) return
+  dragging.moved = true
+  if (dragging.kind === 'arrowpick') return
+  if (dragging.kind === 'draw') {
+    const p = sim.get(dragging.from), w = toWorld(ev.clientX, ev.clientY)
+    const over = nodeAt(ev.clientX, ev.clientY)
+    if (dragging.over && dragging.over !== over) els.get(dragging.over)?.g.classList.remove('drop-target')
+    dragging.over = over && over !== dragging.from ? over : null
+    if (dragging.over) els.get(dragging.over)?.g.classList.add('drop-target')
+    if (p) dragging.draft.setAttribute('d', `M${p.x.toFixed(1)} ${p.y.toFixed(1)} L${w.x.toFixed(1)} ${w.y.toFixed(1)}`)
+    return
+  }
+  if (dragging.kind === 'pan') {
+    view = { ...view, tx: dragging.tx + dx, ty: dragging.ty + dy }
+    place()
+    return
+  }
+  dragging.g.classList.add('dragging')
+  const w = toWorld(ev.clientX, ev.clientY)
+  const nx = w.x + dragging.offX, ny = w.y + dragging.offY
+  const mdx = nx - dragging.last[0], mdy = ny - dragging.last[1]
+  dragging.p.x = nx; dragging.p.y = ny; dragging.p.fixed = true
+  dragging.last = [nx, ny]
+  // A bundle carries its sessions along.
+  if (!model.byId.get(dragging.id)?.row) {
+    for (const id of descendants(dragging.id)) { const q = sim.get(id); if (q) { q.x += mdx; q.y += mdy } }
+  }
+  place()
+})
+
+function endDrag(ev) {
+  if (!dragging) return
+  const d = dragging
+  dragging = null
+  svg.classList.remove('panning')
+  d.g?.classList.remove('dragging')
+  if (d.kind === 'draw') {
+    d.draft.remove()
+    svg.classList.remove('drawing')
+    if (d.over) els.get(d.over)?.g.classList.remove('drop-target')
+    if (!d.moved) { select(d.from === selected ? '' : d.from); return }
+    const to = nodeAt(ev.clientX, ev.clientY)
+    if (to && to !== d.from) addArrow(d.from, to)
+    return
+  }
+  if (d.kind === 'arrowpick') { if (!d.moved) selectArrow(d.id); return }
+  if (!d.moved) {
+    if (d.kind === 'node') select(d.id === selected ? '' : d.id)
+    else select('')
+    return
+  }
+  scheduleSave()
+}
+function nodeAt(x, y) {
+  const hit = document.elementFromPoint(x, y)
+  return hit?.closest?.('.node')?.dataset.id || null
+}
+
+function addArrow(from, to) {
+  const dup = arrows.find(a => a.from === from && a.to === to)
+  if (dup) { selectArrow(dup.id); return }
+  const id = 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+  arrows.push({ id, from, to, label: '' })
+  drawArrows(); place()
+  selectArrow(id)
+  scheduleSave()
+  setTimeout(() => $('panel').querySelector('[data-arrow-label]')?.focus(), 0)
+}
+
+function selectArrow(id) {
+  selectedArrow = id
+  selected = ''
+  confirmArchive = ''
+  highlight()
+  renderPanel()
+}
+
+svg.addEventListener('pointerup', endDrag)
+svg.addEventListener('pointercancel', endDrag)
+svg.addEventListener('pointerleave', () => { if (!dragging) hideTip() })
+svg.addEventListener('dblclick', ev => {
+  const nodeEl = ev.target.closest('.node')
+  const n = nodeEl && model.byId.get(nodeEl.dataset.id)
+  if (n?.row) act({ type: 'open', sessionId: n.row.id }, 'Opening “' + clip(n.row.title, 40) + '”')
+})
+
+// ---------- tooltip ----------
+function ago(iso) {
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return '—'
+  const m = Math.max(0, Math.round((Date.now() - t) / 60000))
+  if (m < 1) return 'just now'
+  if (m < 60) return m + 'm ago'
+  const h = Math.round(m / 60)
+  if (h < 24) return h + 'h ago'
+  const d = Math.round(h / 24)
+  return d < 45 ? d + 'd ago' : Math.round(d / 30) + 'mo ago'
+}
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+
+function showTip(ev) {
+  const nodeEl = ev.target.closest?.('.node')
+  const tip = $('tooltip')
+  if (!nodeEl) return hideTip()
+  const n = model.byId.get(nodeEl.dataset.id)
+  if (!n) return hideTip()
+  if (n.row) {
+    tip.innerHTML = `<b>${esc(n.label)}</b><span>${esc(n.bundle)} · ${n.row.running ? 'running' : 'idle'} · ${esc(ago(n.row.lastActivityAt))}</span>`
+  } else {
+    const list = descendants(n.id).filter(id => model.byId.get(id)?.row)
+    tip.innerHTML = `<b>${esc(n.label)}</b><span>${list.length} sessions</span>`
+  }
+  const { left, top, w } = size()
+  tip.hidden = false
+  const x = ev.clientX - left + 14, y = ev.clientY - top + 14
+  tip.style.left = Math.min(x, w - tip.offsetWidth - 8) + 'px'
+  tip.style.top = y + 'px'
+}
+function hideTip() { $('tooltip').hidden = true }
+
+// ---------- the side panel ----------
+function select(id) {
+  selected = id
+  selectedArrow = ''
+  confirmArchive = ''
+  highlight()
+  renderPanel()
+  const p = sim.get(id)
+  if (p) {
+    const { w, h } = size()
+    const sx = p.x * view.k + view.tx, sy = p.y * view.k + view.ty
+    if (w >= 760 && sx > w - 370) centerOn(id)
+    else if (w < 760 && sy > h * 0.42) centerOn(id)
+  }
+}
+
+function itemHtml(r, depth = 0) {
+  const n = model.byId.get(r.id)
+  return `<button class="item${r.running ? ' run' : ''}" data-select="${esc(r.id)}" style="padding-left:${8 + depth * 14}px">
+    <span class="d" style="background:${n?.color || '#8b93a1'}"></span>${depth ? '<span class="branch"></span>' : ''}<span class="t">${esc(r.title)}</span><span class="a">${esc(ago(r.lastActivityAt))}</span></button>`
+}
+
+function nestedOrder(rows) {
+  const ids = new Set(rows.map(r => r.id)), kids = new Map(), roots = [], out = [], seen = new Set()
+  for (const r of rows) {
+    const p = (data.nests || {})[r.id] || r.startedBy
+    if (p && p !== r.id && ids.has(p)) { if (!kids.has(p)) kids.set(p, []); kids.get(p).push(r) } else roots.push(r)
+  }
+  const walk = (r, d) => { if (seen.has(r.id)) return; seen.add(r.id); out.push([r, d]); for (const k of kids.get(r.id) || []) walk(k, d + 1) }
+  roots.forEach(r => walk(r, 0)); rows.forEach(r => walk(r, 0))
+  return out
+}
+
+function moveOptions(r) {
+  const opts = []
+  for (const node of model.tree || []) {
+    if (node.section) opts.push([node.section.id, node.label])
+    else for (const c of node.children) opts.push([c.section.id, node.label + ' › ' + c.label])
+  }
+  opts.push(['sessions', 'Unsorted'])
+  const filed = new Set((data.sections || []).map(s => s.id))
+  const cur = r.group && filed.has(r.group) ? r.group : 'sessions'
+  return opts.map(([v, l]) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(l)}</option>`).join('')
+}
+
+function nestOptions(r) {
+  const nests = data.nests || {}
+  const blocked = new Set([r.id])
+  let grew = true
+  while (grew) { grew = false; for (const [c, p] of Object.entries(nests)) if (blocked.has(p) && !blocked.has(c)) { blocked.add(c); grew = true } }
+  const cur = nests[r.id] || ''
+  const rows = data.rows.filter(x => !blocked.has(x.id)).sort((a, b) => a.title.localeCompare(b.title))
+  return `<option value="">Not nested</option>` + rows.map(x => `<option value="${esc(x.id)}"${x.id === cur ? ' selected' : ''}>${esc(clip(x.title, 60))}</option>`).join('')
+}
+
+function renderPanel() {
+  const panel = $('panel')
+  const n = model.byId.get(selected)
+  const arrow = arrows.find(a => a.id === selectedArrow)
+  document.body.classList.toggle('has-panel', Boolean(n || arrow))
+  if (!n && !arrow) { panel.hidden = true; return }
+  panel.hidden = false
+  const rowsById = new Map(data.rows.map(r => [r.id, r]))
+  if (arrow) {
+    const end = id => {
+      const node = model.byId.get(id)
+      const r = rowsById.get(id)
+      if (r) return itemHtml(r)
+      return `<button class="item" data-select="${esc(id)}"><span class="d" style="background:${node?.color || '#8b93a1'}"></span><span class="t">${esc(node?.label || 'gone')}</span></button>`
+    }
+    panel.innerHTML = `<div class="panel-head"><span class="swatch" style="background:var(--draw)"></span><h2>Your arrow</h2><button class="x" data-close>×</button></div>
+      <div class="panel-body">
+        <div class="links"><div><h3>From</h3>${end(arrow.from)}</div><div><h3>To</h3>${end(arrow.to)}</div></div>
+        <label class="field">Label
+          <input data-arrow-label maxlength="60" placeholder="e.g. feeds into, waiting on" value="${esc(arrow.label || '')}">
+        </label>
+        <div class="row-actions">
+          <button class="btn" data-arrow="reverse">Reverse</button>
+          <button class="btn danger" data-arrow="delete">Delete</button>
+        </div>
+        <span class="note">Arrows you draw are only on this map: they don't connect, message or change the sessions.</span>
+      </div>`
+    return
+  }
+  if (!n.row) {
+    const list = descendants(n.id).map(id => rowsById.get(id)).filter(Boolean)
+    const live = list.filter(r => r.running).length
+    panel.innerHTML = `<div class="panel-head"><span class="swatch" style="background:${n.color}"></span><h2>${esc(n.label)}</h2><button class="x" data-close>×</button></div>
+      <div class="panel-body"><div class="chips"><span class="chip">${list.length} sessions</span>${live ? `<span class="chip run">● ${live} running</span>` : ''}</div>
+      <div class="links">${list.length ? nestedOrder(list).map(([r, d]) => itemHtml(r, d)).join('') : '<span class="note">No sessions here yet.</span>'}</div></div>`
+    return
+  }
+  const r = n.row
+  const startedBy = r.startedBy && rowsById.get(r.startedBy)
+  const started = data.rows.filter(x => x.startedBy === r.id)
+  const nestParent = rowsById.get((data.nests || {})[r.id])
+  const nestedHere = data.rows.filter(x => (data.nests || {})[x.id] === r.id)
+  const chips = [
+    `<span class="chip">${esc(n.bundle)}</span>`,
+    r.running ? '<span class="chip run">● running</span>' : '<span class="chip">idle</span>',
+    r.pinned ? '<span class="chip">★ pinned</span>' : '',
+    r.routine ? '<span class="chip">scheduled run</span>' : '',
+    r.isSelf ? '<span class="chip">this session</span>' : '',
+  ].join('')
+  const section = (title, rows) => (rows.length ? `<div><h3>${title}</h3>${rows.map(x => itemHtml(x)).join('')}</div>` : '')
+  panel.innerHTML = `<div class="panel-head"><span class="swatch" style="background:${n.color}"></span><h2>${esc(r.title)}</h2><button class="x" data-close>×</button></div>
+    <div class="panel-body">
+      <div class="chips">${chips}</div>
+      <div class="note">Last active ${esc(ago(r.lastActivityAt))}</div>
+      <div class="row-actions">
+        <button class="btn primary" data-act="open">Open</button>
+        ${r.routine ? '' : `<button class="btn" data-act="pin">${r.pinned ? 'Unpin' : 'Pin'}</button>`}
+        ${r.isSelf ? '' : '<button class="btn danger" data-act="archive">Archive…</button>'}
+      </div>
+      ${confirmArchive === r.id ? `<div class="confirm"><span>Archive “${esc(clip(r.title, 50))}”? Its process stops; you can restore it from Archived any time.</span>
+        <div class="row-actions"><button class="btn danger" data-act="archive-yes">Archive</button><button class="btn" data-act="archive-no">Cancel</button></div></div>` : ''}
+      <label class="field">Move to bundle
+        <select data-act="move"${r.routine || r.pinned ? ' disabled' : ''}>${moveOptions(r)}</select>
+        ${r.pinned ? '<span class="note">Pinned sessions stay on top. Unpin to file it.</span>' : ''}
+        ${r.routine ? '<span class="note">Scheduled runs live under their routine.</span>' : ''}
+      </label>
+      <label class="field"><span>Nest under <span class="tag">map only</span></span>
+        <select data-act="nest">${nestOptions(r)}</select>
+        <span class="note">The app can't attach sessions to each other; this nests it here and in the Bundles list only.</span>
+      </label>
+      <div class="links">
+        ${section('Started by · linked', startedBy ? [startedBy] : [])}
+        ${section('Started · linked', started)}
+        ${section('Nested under · map only', nestParent ? [nestParent] : [])}
+        ${section('Nested here · map only', nestedHere)}
+      </div>
+    </div>`
+}
+
+$('panel').addEventListener('click', ev => {
+  const t = ev.target.closest('button')
+  if (!t) return
+  if (t.dataset.close !== undefined) return select('')
+  if (t.dataset.select) { select(t.dataset.select); centerOn(t.dataset.select); return }
+  if (t.dataset.arrow) {
+    const a = arrows.find(x => x.id === selectedArrow)
+    if (!a) return
+    if (t.dataset.arrow === 'reverse') { [a.from, a.to] = [a.to, a.from]; place(); renderPanel() }
+    if (t.dataset.arrow === 'delete') { arrows = arrows.filter(x => x.id !== a.id); drawArrows(); selectArrow('') }
+    scheduleSave()
+    return
+  }
+  const n = model.byId.get(selected)
+  const r = n?.row
+  if (!r) return
+  const name = '“' + clip(r.title, 40) + '”'
+  if (t.dataset.act === 'open') act({ type: 'open', sessionId: r.id }, 'Opening ' + name)
+  if (t.dataset.act === 'pin') act({ type: 'pin', sessionId: r.id, pinned: !r.pinned }, (r.pinned ? 'Unpinning ' : 'Pinning ') + name)
+  if (t.dataset.act === 'archive') { confirmArchive = r.id; renderPanel() }
+  if (t.dataset.act === 'archive-no') { confirmArchive = ''; renderPanel() }
+  if (t.dataset.act === 'archive-yes') { confirmArchive = ''; act({ type: 'archive', sessionId: r.id }, 'Archiving ' + name).then(ok => ok && select('')) }
+})
+$('panel').addEventListener('input', ev => {
+  const input = ev.target.closest('[data-arrow-label]')
+  const a = input && arrows.find(x => x.id === selectedArrow)
+  if (!a) return
+  a.label = input.value.slice(0, 60)
+  drawArrows(); place(); scheduleSave()
+})
+$('panel').addEventListener('keydown', ev => {
+  if (ev.target.closest('[data-arrow-label]') && ev.key === 'Enter') ev.target.blur()
+})
+$('panel').addEventListener('change', ev => {
+  const s = ev.target.closest('select')
+  const r = model.byId.get(selected)?.row
+  if (!s || !r) return
+  if (s.dataset.act === 'move') act({ type: 'move', sessionId: r.id, target: s.value }, 'Moving “' + clip(r.title, 40) + '”')
+  if (s.dataset.act === 'nest') act({ type: 'nest', sessionId: r.id, parent: s.value }, s.value ? 'Nesting' : 'Un-nesting')
+})
+
+function centerOn(id) {
+  const p = sim.get(id)
+  if (!p) return
+  const { w, h } = size()
+  const panelW = w < 760 ? 0 : 352
+  const sheet = w < 760 && !$('panel').hidden ? h * 0.3 : 0
+  view = { ...view, tx: (w - panelW) / 2 - p.x * view.k, ty: h / 2 - sheet - p.y * view.k }
+  place(); scheduleSave()
+}
+
+// ---------- header controls ----------
+$('fit').onclick = () => fit()
+$('draw').onclick = () => setDrawMode(!drawMode)
+function setDrawMode(on) {
+  drawMode = on
+  $('draw').classList.toggle('on', on)
+  svg.classList.toggle('draw-mode', on)
+  if (on) toast('Drag from one node to another to draw an arrow')
+}
+$('arrange').onclick = () => {
+  sim.clear(); seedPositions(); settleNow(); place(); fit()
+}
+$('labels').onclick = () => {
+  showLabels = !showLabels
+  $('labels').setAttribute('aria-pressed', String(showLabels))
+  place()
+}
+$('search').addEventListener('input', ev => { query = ev.target.value; highlight() })
+$('search').addEventListener('keydown', ev => {
+  if (ev.key === 'Enter') {
+    const q = query.trim().toLowerCase()
+    const hit = model.nodes.find(n => n.label.toLowerCase().includes(q))
+    if (hit) { select(hit.id); centerOn(hit.id) }
+  }
+  if (ev.key === 'Escape') { ev.target.value = ''; query = ''; highlight(); ev.target.blur() }
+})
+document.addEventListener('keydown', ev => {
+  if (ev.target.closest('input, select, textarea')) return
+  if (ev.key === '/') { ev.preventDefault(); $('search').focus() }
+  else if (ev.key === 'f' || ev.key === 'F') fit()
+  else if (ev.key === 'l' || ev.key === 'L') $('labels').click()
+  else if (ev.key === 'Escape') { if (drawMode) setDrawMode(false); select('') }
+  else if ((ev.key === 'Delete' || ev.key === 'Backspace') && selectedArrow) {
+    arrows = arrows.filter(a => a.id !== selectedArrow); drawArrows(); selectArrow(''); scheduleSave()
+  }
+  else if (ev.key === '+' || ev.key === '=') { const { w, h } = size(); zoomAt(w / 2, h / 2, 1.2) }
+  else if (ev.key === '-') { const { w, h } = size(); zoomAt(w / 2, h / 2, 1 / 1.2) }
+})
+
+// ---------- saving the layout ----------
+function scheduleSave() {
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    const pos = {}
+    for (const [id, p] of sim) pos[id] = [Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10]
+    api('/api/layout', { method: 'PUT', body: JSON.stringify({ pos, view, labels: showLabels, arrows }) }).catch(() => {})
+  }, 600)
+}
+
+// ---------- live data ----------
+function setLive() {
+  const live = $('live')
+  const age = Date.now() - (data.loadedAt || 0)
+  live.className = 'live ' + (DEMO ? 'demo' : !data.loadedAt ? 'down' : age < 120000 ? 'ok' : 'stale')
+  live.querySelector('b').textContent = DEMO ? 'demo data' : !data.loadedAt ? 'waiting for the mod' : age < 120000 ? 'live' : 'paused (' + ago(new Date(data.loadedAt).toISOString()).replace(' ago', '') + ')'
+  const running = data.rows.filter(r => r.running).length
+  $('stats').textContent = `${data.rows.length} sessions · ${running} running · ${(data.sections || []).length} bundles`
+  $('empty').hidden = data.rows.length > 0
+}
+
+async function loadData(force = false) {
+  try {
+    const next = await api('/api/data')
+    const key = JSON.stringify([next.rows, next.sections, next.labels, next.nests])
+    data = { labels: { parents: {}, children: {} }, nests: {}, ...next }
+    if (force || key !== dataKey) {
+      dataKey = key
+      buildModel()
+      const fresh = seedPositions()
+      if (fresh > 0 && fresh === sim.size) { settleNow(); draw(); fit() }
+      else { draw(); if (fresh > 0) heat(0.4) }
+      renderPanel()
+    }
+    setLive()
+  } catch (err) {
+    const live = $('live')
+    live.className = 'live down'
+    live.querySelector('b').textContent = err.message === 'bad token' ? 'link expired: reopen from Bundles' : 'offline'
+  }
+}
+
+async function start() {
+  try {
+    const saved = await api('/api/layout')
+    if (saved.pos) for (const [id, [x, y]] of Object.entries(saved.pos)) sim.set(id, { x, y, vx: 0, vy: 0, fixed: true })
+    if (saved.view && Number.isFinite(saved.view.k)) view = saved.view
+    if (saved.labels === false) { showLabels = false; $('labels').setAttribute('aria-pressed', 'false') }
+    if (Array.isArray(saved.arrows)) arrows = saved.arrows.filter(a => a && a.id && a.from && a.to)
+  } catch {}
+  await loadData(true)
+  const pick = new URLSearchParams(location.search).get('select')
+  if (pick && model.byId.has(pick)) select(pick)
+  setInterval(() => loadData(), 2500)
+  setInterval(setLive, 10000)
+  window.addEventListener('resize', () => place())
+  new ResizeObserver(() => { if (fitPending) fit() }).observe(svg)
+}
+start()
+</script>
+</body>
+</html>

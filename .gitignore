@@ -1,0 +1,10 @@
+# Written by the engine when it loads the mod
+.claude-plugin/types/
+.mcpb-cache/
+
+# Operating system and editor files
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.log
